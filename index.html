@@ -363,10 +363,15 @@
             if (bossActive) return;
 
             const progress = (GAME_DURATION - timeLeft) / GAME_DURATION;
-            const minTime = 400 - (200 * progress); 
-            const maxTime = 1000 - (500 * progress); 
-            const time = randomTime(minTime, maxTime);
             
+            // --- 调整过的速度逻辑 (变慢了) ---
+            // 之前是 min: 400->200 (太快了), max: 1000->500
+            // 现在改为 min: 600->450, max: 1200->750
+            // 这样能保证最后阶段地鼠至少停留近 0.5 秒，足够反应
+            const minTime = 600 - (150 * progress); 
+            const maxTime = 1200 - (450 * progress); 
+            
+            const time = randomTime(minTime, maxTime);
             const hole = randomHole(holes);
 
             // 概率判定
@@ -559,7 +564,7 @@
             }
 
             let desc = "这就没力气了？";
-            if(score > 600) desc = "暴走模式！打得谢菲尔德满地找牙！！";
+            if(score > 600) desc = "暴走模式！打得谢菲尔德满地找牙！！🔥";
             else if(score > 300) desc = "出手不凡，谢菲尔德瑟瑟发抖！";
             else if(score > 100) desc = "还需要多加练习！";
 
@@ -591,8 +596,4 @@
 </div>
     
 </body>
-
 </html>
-
-
-
