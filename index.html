@@ -1,0 +1,585 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>暴揍谢菲尔德！</title>
+    <style>
+        /* --- 全局样式 --- */
+        body {
+            font-family: "Segoe UI", Roboto, Arial, sans-serif;
+            background-color: #263238; 
+            background-image: 
+                linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+            background-size: 30px 30px; 
+            margin: 0;
+            overflow: hidden;
+            touch-action: none; 
+            user-select: none;
+            color: white;
+            height: 100dvh; 
+            display: flex;
+            flex-direction: column;
+            cursor: crosshair; 
+        }
+
+        /* --- 顶部栏 --- */
+        .top-bar {
+            display: flex;
+            align-items: center;
+            padding: 10px 15px;
+            z-index: 20;
+            background: rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(5px);
+        }
+
+        .btn-pause {
+            width: 45px; height: 45px;
+            background: #ff5252;
+            border: 3px solid #fff;
+            border-radius: 10px; 
+            font-size: 20px; color: #fff;
+            display: flex; justify-content: center; align-items: center;
+            cursor: pointer;
+            box-shadow: 0 4px 0 #b71c1c;
+            margin-right: 15px;
+        }
+        .btn-pause:active { transform: translateY(4px); box-shadow: 0 0 0; }
+
+        .dashboard {
+            flex: 1;
+            display: flex;
+            justify-content: space-around;
+        }
+
+        .dash-item { text-align: center; }
+        .dash-label { font-size: 10px; color: #90a4ae; font-weight: bold; letter-spacing: 1px; text-transform: uppercase; }
+        .dash-value { font-size: 26px; font-weight: 900; font-family: "Courier New", monospace; text-shadow: 2px 2px 0 #000; }
+
+        #timer { color: #ffeb3b; } 
+        #score { color: #69f0ae; } 
+        #best-score { color: #e040fb; }
+
+        /* --- 游戏战场 --- */
+        .game-area {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            padding-bottom: 50px;
+        }
+
+        .grid-container {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 15px;
+            width: 320px;
+            max-width: 90vw;
+        }
+
+        .hole {
+            width: 100%;
+            aspect-ratio: 1 / 1;
+            background: radial-gradient(circle at 50% 100%, #546e7a, #37474f); 
+            border-radius: 50%;
+            position: relative;
+            border: 4px solid #78909c;
+            overflow: hidden;
+            box-shadow: inset 0 10px 20px rgba(0,0,0,0.8);
+            cursor: crosshair;
+        }
+
+        /* 角色/地鼠 */
+        .mole {
+            width: 80%;
+            height: 90%;
+            position: absolute;
+            bottom: -100%; 
+            left: 10%;
+            transition: bottom 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275); 
+            pointer-events: none; 
+            object-fit: contain;
+        }
+
+        /* 普通冒出 */
+        .hole.up .mole {
+            bottom: 0;
+            pointer-events: auto; 
+        }
+
+        /* --- 🔥 BOSS 模式样式 --- */
+        .hole.up-boss {
+            border-color: #ff3d00; /* 边框变红 */
+            box-shadow: 0 0 20px #ff3d00; /* 发光 */
+        }
+        
+        .hole.up-boss .mole {
+            bottom: 0;
+            pointer-events: auto;
+            transform: scale(1.1); /* 大一点 */
+            filter: drop-shadow(0 0 10px red); /* 红色邪恶光环 */
+        }
+
+        /* 被连续暴打时的抖动动画 */
+        @keyframes shake-boss {
+            0% { transform: scale(1.1) rotate(0deg); }
+            25% { transform: scale(1.05) rotate(-5deg); filter: sepia(1) saturate(5) hue-rotate(-50deg); } /* 变红 */
+            50% { transform: scale(1.1) rotate(0deg); }
+            75% { transform: scale(1.05) rotate(5deg); filter: sepia(1) saturate(5) hue-rotate(-50deg); }
+            100% { transform: scale(1.1) rotate(0deg); }
+        }
+        .hole.up-boss .mole.hit-anim {
+            animation: shake-boss 0.1s linear;
+        }
+
+        
+        /* 炸弹/陷阱 */
+        .trap {
+            font-size: 60px;
+            position: absolute;
+            bottom: -100%;
+            left: 50%;
+            transform: translateX(-50%);
+            transition: bottom 0.2s;
+            pointer-events: none;
+        }
+        .hole.up-trap .trap { bottom: 10px; pointer-events: auto; }
+
+        /* 普通打击动画 */
+        .hole.bonked .mole {
+            transform: scale(0.9) translateY(20px); 
+            filter: sepia(1) hue-rotate(300deg) saturate(2); 
+        }
+
+        /* 击中特效 */
+        .hit-effect {
+            position: absolute;
+            font-size: 50px;
+            font-weight: 900;
+            color: #ffeb3b;
+            text-shadow: 2px 2px 0 #d50000;
+            pointer-events: none;
+            z-index: 100;
+            animation: hitPop 0.3s forwards;
+            left: 50%; top: 50%;
+            transform: translate(-50%, -50%);
+            display: none;
+        }
+        .hole.bonked .hit-effect { display: block; }
+
+        /* BOSS击中特效 (不同的字) */
+        .boss-hit-effect {
+            position: absolute;
+            font-size: 40px;
+            font-weight: 900;
+            color: #ff3d00;
+            text-shadow: 2px 2px 0 #fff;
+            pointer-events: none;
+            z-index: 100;
+            animation: hitPop 0.3s forwards;
+            left: 50%; top: 40%;
+            transform: translate(-50%, -50%);
+            display: none;
+        }
+        
+        @keyframes hitPop {
+            0% { transform: translate(-50%, -50%) scale(0.5); opacity: 1; }
+            100% { transform: translate(-50%, -50%) scale(1.5) rotate(15deg); opacity: 0; }
+        }
+
+        /* --- 弹窗样式 --- */
+        .overlay-modal {
+            display: none;
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0, 0, 0, 0.85); backdrop-filter: blur(8px);
+            z-index: 1000;
+            flex-direction: column; justify-content: center; align-items: center;
+            animation: fadeIn 0.3s;
+        }
+        #start-overlay { display: flex; }
+
+        .modal-content {
+            background: #37474f; color: white;
+            padding: 30px; border-radius: 15px; text-align: center;
+            border: 2px solid #546e7a;
+            box-shadow: 0 0 30px rgba(0,0,0,0.5);
+            width: 80%; max-width: 350px;
+        }
+
+        .modal-title { font-size: 28px; color: #ff5252; margin: 0; font-weight: 900; text-transform: uppercase; }
+        
+        .new-record-label {
+            display: none; font-size: 16px; color: #000; background: #ffeb3b;
+            padding: 5px 15px; transform: skewX(-10deg); margin-top: 10px; font-weight: bold;
+            box-shadow: 0 4px 10px rgba(255, 235, 59, 0.4);
+            animation: bounce 0.6s infinite alternate;
+        }
+
+        .btn-action {
+            background: #ff5252; border: none; padding: 15px 40px; font-size: 20px;
+            border-radius: 5px; color: white; font-weight: bold; cursor: pointer;
+            box-shadow: 0 4px #b71c1c; transition: all 0.1s; margin: 10px;
+            text-transform: uppercase; letter-spacing: 1px;
+        }
+        .btn-action:active { transform: translateY(4px); box-shadow: 0 0 0; }
+        
+        .btn-secondary {
+            background: #546e7a; box-shadow: 0 4px #37474f;
+        }
+        .btn-secondary:active { transform: translateY(4px); box-shadow: 0 0 0; }
+
+        /* 飘字 */
+        .float-text {
+            position: absolute; font-size: 32px; font-weight: 900; pointer-events: none;
+            animation: floatUp 0.5s forwards; z-index: 200;
+            text-shadow: 2px 2px 0 rgba(0,0,0,0.5);
+            white-space: nowrap;
+        }
+        
+        @keyframes floatUp {
+            0% { transform: translateY(0) scale(1); opacity: 1; }
+            100% { transform: translateY(-60px) scale(1.3); opacity: 0; }
+        }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes bounce { from { transform: scale(1); } to { transform: scale(1.1); } }
+
+    </style>
+</head>
+<body>
+
+    <div class="top-bar">
+        <div class="btn-pause" onclick="togglePause()">⏸</div>
+        <div class="dashboard">
+            <div class="dash-item">
+                <div class="dash-label">时间</div>
+                <div class="dash-value" id="timer">45.0</div>
+            </div>
+            <div class="dash-item">
+                <div class="dash-label">得分</div>
+                <div class="dash-value" id="score">0</div>
+            </div>
+            <div class="dash-item">
+                <div class="dash-label">历史记录</div>
+                <div class="dash-value" id="best-score">0</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="game-area">
+        <div class="grid-container">
+            <!-- 9个洞 -->
+            <div class="hole" id="h1"><img src="character.png" class="mole"><div class="trap">💣</div><div class="hit-effect">💥</div><div class="boss-hit-effect">👊</div></div>
+            <div class="hole" id="h2"><img src="character.png" class="mole"><div class="trap">💣</div><div class="hit-effect">💥</div><div class="boss-hit-effect">👊</div></div>
+            <div class="hole" id="h3"><img src="character.png" class="mole"><div class="trap">💣</div><div class="hit-effect">💥</div><div class="boss-hit-effect">👊</div></div>
+            <div class="hole" id="h4"><img src="character.png" class="mole"><div class="trap">💣</div><div class="hit-effect">💥</div><div class="boss-hit-effect">👊</div></div>
+            <div class="hole" id="h5"><img src="character.png" class="mole"><div class="trap">💣</div><div class="hit-effect">💥</div><div class="boss-hit-effect">👊</div></div>
+            <div class="hole" id="h6"><img src="character.png" class="mole"><div class="trap">💣</div><div class="hit-effect">💥</div><div class="boss-hit-effect">👊</div></div>
+            <div class="hole" id="h7"><img src="character.png" class="mole"><div class="trap">💣</div><div class="hit-effect">💥</div><div class="boss-hit-effect">👊</div></div>
+            <div class="hole" id="h8"><img src="character.png" class="mole"><div class="trap">💣</div><div class="hit-effect">💥</div><div class="boss-hit-effect">👊</div></div>
+            <div class="hole" id="h9"><img src="character.png" class="mole"><div class="trap">💣</div><div class="hit-effect">💥</div><div class="boss-hit-effect">👊</div></div>
+        </div>
+    </div>
+
+    <!-- 开始 -->
+    <div id="start-overlay" class="overlay-modal">
+        <div class="modal-content">
+            <h2 class="modal-title">暴揍谢菲尔德大作战</h2>
+            <p style="color:#cfd8dc; line-height:1.6;">看见谢菲尔德就打！👊<br>出现炸弹要避开哦💥</p>
+            <button class="btn-action" onclick="initGame()">开始战斗</button>
+        </div>
+    </div>
+
+    <!-- 暂停 -->
+    <div id="pause-modal" class="overlay-modal">
+        <div class="modal-content">
+            <h2 class="modal-title" style="color:#ffeb3b">战术暂停</h2>
+            <button class="btn-action" onclick="togglePause()">继续</button>
+            <button class="btn-action btn-secondary" onclick="initGame()">重新开始</button>
+        </div>
+    </div>
+
+    <!-- 结束 -->
+    <div id="game-over-modal" class="overlay-modal">
+        <div class="modal-content">
+            <div id="new-record-badge" class="new-record-label">🏆 新纪录!</div>
+            <h2 class="modal-title">战斗结束</h2>
+            <div style="font-size: 50px; color: #69f0ae; font-weight:900; margin:10px 0;" id="final-score">0</div>
+            <p id="final-desc" style="color:#cfd8dc;">...</p>
+            <button class="btn-action" onclick="initGame()">再打一局</button>
+        </div>
+    </div>
+
+    <script>
+        const GAME_DURATION = 45.0; 
+        const holes = document.querySelectorAll('.hole');
+        const scoreEl = document.getElementById('score');
+        const bestScoreEl = document.getElementById('best-score');
+        const timerEl = document.getElementById('timer');
+        
+        const modalStart = document.getElementById('start-overlay');
+        const modalPause = document.getElementById('pause-modal');
+        const modalGameOver = document.getElementById('game-over-modal');
+        
+        const finalScoreEl = document.getElementById('final-score');
+        const finalDescEl = document.getElementById('final-desc');
+        const newRecordBadge = document.getElementById('new-record-badge');
+
+        let score = 0;
+        let timeLeft = GAME_DURATION;
+        let isPlaying = false;
+        let isPaused = false;
+        let lastHole;
+        
+        // 游戏循环计时器
+        let timerInterval;
+        let peepTimeout;
+        
+        // BOSS 状态
+        let bossActive = false; // 是否正在进行BOSS战
+        let bossCombo = 0; // 连击数
+
+        let highScore = localStorage.getItem('whackGameHighScore') || 0;
+        bestScoreEl.textContent = highScore;
+
+        function randomTime(min, max) {
+            return Math.round(Math.random() * (max - min) + min);
+        }
+
+        function randomHole(holes) {
+            const idx = Math.floor(Math.random() * holes.length);
+            const hole = holes[idx];
+            if (hole === lastHole) return randomHole(holes);
+            lastHole = hole;
+            return hole;
+        }
+
+        // 核心循环：冒头
+        function peep() {
+            if (!isPlaying || isPaused) return;
+
+            // 如果当前是BOSS模式，暂停普通冒头循环，直到BOSS结束
+            if (bossActive) return;
+
+            const progress = (GAME_DURATION - timeLeft) / GAME_DURATION;
+            const minTime = 400 - (200 * progress); 
+            const maxTime = 1000 - (500 * progress); 
+            const time = randomTime(minTime, maxTime);
+            
+            const hole = randomHole(holes);
+
+            // 概率判定
+            // 5% 概率出现 BOSS (暴走沙包)
+            // 20% 概率出现 炸弹
+            const rand = Math.random();
+            
+            if (rand < 0.05) {
+                // --- BOSS 降临 ---
+                triggerBoss(hole);
+            } else if (rand < 0.25) {
+                // --- 炸弹 ---
+                hole.classList.add('up-trap');
+                hole.querySelector('.trap').onclick = (e) => bonkTrap(e, hole);
+                scheduleNext(hole, time, 'up-trap');
+            } else {
+                // --- 普通怪 ---
+                hole.classList.add('up');
+                hole.querySelector('.mole').onclick = (e) => bonkMole(e, hole);
+                scheduleNext(hole, time, 'up');
+            }
+        }
+
+        // 安排下一次循环
+        function scheduleNext(hole, time, activeClass) {
+            peepTimeout = setTimeout(() => {
+                // 缩回去
+                hole.classList.remove(activeClass);
+                // 清理事件
+                hole.querySelector('.mole').onclick = null;
+                hole.querySelector('.trap').onclick = null;
+                
+                if (isPlaying && !isPaused) peep();
+            }, time);
+        }
+
+        // --- 🥊 BOSS 模式逻辑 ---
+        function triggerBoss(hole) {
+            bossActive = true;
+            bossCombo = 0;
+            hole.classList.add('up-boss'); // 红色光环样式
+            
+            // BOSS 绑定连击事件
+            const mole = hole.querySelector('.mole');
+            mole.onclick = (e) => bonkBoss(e, hole);
+
+            // BOSS 持续 3 秒
+            peepTimeout = setTimeout(() => {
+                hole.classList.remove('up-boss');
+                mole.onclick = null;
+                bossActive = false; // 结束BOSS状态
+                
+                // 恢复普通循环
+                if (isPlaying && !isPaused) peep();
+            }, 3000);
+        }
+
+        function bonkBoss(e, hole) {
+            if(!e.isTrusted) return;
+
+            score += 5; // 连击单次分数稍低，为了让你多点
+            bossCombo++;
+            scoreEl.textContent = score;
+
+            // 视觉反馈：连击数字
+            showFloatText("暴揍 x" + bossCombo + "!", e.clientX, e.clientY, "#ff3d00");
+            
+            // 视觉反馈：BOSS 震动
+            const mole = hole.querySelector('.mole');
+            mole.classList.remove('hit-anim');
+            void mole.offsetWidth; // 强制重绘，为了让动画能重复触发
+            mole.classList.add('hit-anim');
+
+            // 视觉反馈：打击图标
+            const effect = hole.querySelector('.boss-hit-effect');
+            effect.style.display = 'none';
+            void effect.offsetWidth;
+            effect.style.display = 'block';
+
+            // 屏幕震动
+            document.body.style.transform = `translate(${Math.random()*4-2}px, ${Math.random()*4-2}px)`;
+            setTimeout(()=> document.body.style.transform = "translate(0,0)", 50);
+
+            // 手机强震动
+            if(navigator.vibrate) navigator.vibrate(80);
+        }
+
+        // --- 普通打击逻辑 ---
+        function bonkMole(e, hole) {
+            if(!e.isTrusted) return; 
+
+            score += 10;
+            hole.classList.remove('up'); 
+            hole.classList.add('bonked'); 
+            setTimeout(() => hole.classList.remove('bonked'), 300);
+
+            scoreEl.textContent = score;
+            showFloatText("+10", e.clientX, e.clientY, "#69f0ae");
+            if(navigator.vibrate) navigator.vibrate(40);
+        }
+
+        function bonkTrap(e, hole) {
+            if(!e.isTrusted) return;
+
+            score -= 30; 
+            hole.classList.remove('up-trap');
+            scoreEl.textContent = score;
+            showFloatText("-30", e.clientX, e.clientY, "#ff5252");
+            
+            document.body.style.backgroundColor = "#b71c1c";
+            setTimeout(() => document.body.style.backgroundColor = "#263238", 100);
+            if(navigator.vibrate) navigator.vibrate(200);
+        }
+
+        function togglePause() {
+            if (!isPlaying) return;
+            isPaused = !isPaused;
+            
+            if (isPaused) {
+                modalPause.style.display = 'flex';
+                clearTimeout(peepTimeout);
+            } else {
+                modalPause.style.display = 'none';
+                // 如果暂停时是BOSS状态，恢复时BOSS会直接消失，为了逻辑简单，直接进入下一轮普通循环
+                // 或者更严谨的做法是记录剩余时间，这里为了简单直接调用peep重新开始
+                if (bossActive) {
+                    // 如果刚好卡在BOSS，强行结束BOSS防止卡死
+                    document.querySelectorAll('.up-boss').forEach(h => {
+                        h.classList.remove('up-boss');
+                        h.querySelector('.mole').onclick = null;
+                    });
+                    bossActive = false;
+                }
+                peep();
+            }
+        }
+
+        function initGame() {
+            modalStart.style.display = 'none';
+            modalGameOver.style.display = 'none';
+            modalPause.style.display = 'none';
+            newRecordBadge.style.display = 'none';
+
+            score = 0;
+            timeLeft = GAME_DURATION;
+            isPlaying = true;
+            isPaused = false;
+            bossActive = false;
+            
+            scoreEl.textContent = 0;
+            bestScoreEl.textContent = highScore;
+            timerEl.textContent = timeLeft.toFixed(1);
+            timerEl.style.color = "#ffeb3b";
+
+            holes.forEach(hole => {
+                hole.classList.remove('up', 'up-trap', 'up-boss', 'bonked');
+                hole.querySelector('.mole').onclick = null;
+                hole.querySelector('.trap').onclick = null;
+            });
+            
+            clearTimeout(peepTimeout);
+            clearInterval(timerInterval);
+
+            peep();
+            
+            timerInterval = setInterval(() => {
+                if(isPaused) return;
+
+                timeLeft -= 0.1;
+                if(timeLeft < 0) timeLeft = 0;
+                timerEl.textContent = timeLeft.toFixed(1);
+                if(timeLeft <= 10) timerEl.style.color = "#ff5252";
+                if(timeLeft <= 0) endGame();
+            }, 100);
+        }
+
+        function endGame() {
+            isPlaying = false;
+            clearInterval(timerInterval);
+            clearTimeout(peepTimeout);
+            bossActive = false;
+            holes.forEach(h => h.classList.remove('up', 'up-trap', 'up-boss'));
+
+            let isNewRecord = false;
+            if (score > highScore) {
+                highScore = score;
+                localStorage.setItem('whackGameHighScore', highScore);
+                bestScoreEl.textContent = highScore;
+                isNewRecord = true;
+            }
+
+            let desc = "这就没力气了？";
+            if(score > 600) desc = "暴走模式！打得谢菲尔德满地找牙！！";
+            else if(score > 300) desc = "出手不凡，谢菲尔德瑟瑟发抖！";
+            else if(score > 100) desc = "还需要多加练习！";
+
+            if (isNewRecord && score > 0) newRecordBadge.style.display = 'block';
+
+            finalScoreEl.textContent = score;
+            finalDescEl.textContent = desc;
+            modalGameOver.style.display = 'flex';
+        }
+
+        function showFloatText(text, x, y, color) {
+            const el = document.createElement('div');
+            el.className = 'float-text';
+            el.textContent = text;
+            el.style.left = x + 'px';
+            el.style.top = y + 'px';
+            el.style.color = color;
+            document.body.appendChild(el);
+            setTimeout(() => el.remove(), 500);
+        }
+    </script>
+</body>
+</html>
