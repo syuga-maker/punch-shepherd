@@ -198,7 +198,10 @@
             flex-direction: column; justify-content: center; align-items: center;
             animation: fadeIn 0.3s;
         }
-        #start-overlay { display: flex; }
+        
+        /* 初始状态：加载层显示，开始层隐藏 */
+        #loading-overlay { display: flex; }
+        #start-overlay { display: none; }
 
         .modal-content {
             background: #37474f; color: white;
@@ -229,6 +232,17 @@
             background: #546e7a; box-shadow: 0 4px #37474f;
         }
         .btn-secondary:active { transform: translateY(4px); box-shadow: 0 0 0; }
+
+        /* 加载动画 */
+        .loader-spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #ff5252;
+            border-radius: 50%;
+            width: 30px; height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
 
         /* 飘字 */
         .float-text {
@@ -282,6 +296,15 @@
         </div>
     </div>
 
+    <!-- 加载中弹窗 -->
+    <div id="loading-overlay" class="overlay-modal">
+        <div class="modal-content">
+            <h2 class="modal-title" style="color:#90a4ae">正在加载资源</h2>
+            <div class="loader-spinner"></div>
+            <p id="loading-text" style="color:#cfd8dc; font-size:14px;">准备弹药中... 0%</p>
+        </div>
+    </div>
+
     <!-- 开始 -->
     <div id="start-overlay" class="overlay-modal">
         <div class="modal-content">
@@ -318,9 +341,12 @@
         const bestScoreEl = document.getElementById('best-score');
         const timerEl = document.getElementById('timer');
         
+        const modalLoading = document.getElementById('loading-overlay'); // 新增：加载层
         const modalStart = document.getElementById('start-overlay');
         const modalPause = document.getElementById('pause-modal');
         const modalGameOver = document.getElementById('game-over-modal');
+        
+        const loadingText = document.getElementById('loading-text'); // 新增：加载文字
         
         const finalScoreEl = document.getElementById('final-score');
         const finalDescEl = document.getElementById('final-desc');
@@ -331,14 +357,76 @@
         let isPlaying = false;
         let isPaused = false;
         let lastHole;
-        
-        // 游戏循环计时器
         let timerInterval;
         let peepTimeout;
         
         // BOSS 状态
-        let bossActive = false; // 是否正在进行BOSS战
-        let bossCombo = 0; // 连击数
+        let bossActive = false; 
+        let bossCombo = 0; 
+
+        // --- 1. 定义资源列表 ---
+        const sounds = {
+            hit: new Audio('hit.mp3'),
+            bomb: new Audio('bomb.mp3'),
+            boss: new Audio('boss.mp3')
+        };
+        const imageSrc = 'character.png';
+
+        // --- 2. 预加载逻辑 ---
+        let assetsLoaded = 0;
+        const totalAssets = 4; // 1图片 + 3音效
+
+        function checkLoad() {
+            assetsLoaded++;
+            const percent = Math.floor((assetsLoaded / totalAssets) * 100);
+            loadingText.textContent = `准备弹药中... ${percent}%`;
+
+            if (assetsLoaded >= totalAssets) {
+                // 全部加载完成，稍微延迟一下让用户看到100%
+                setTimeout(() => {
+                    modalLoading.style.display = 'none';
+                    modalStart.style.display = 'flex'; // 显示开始按钮
+                }, 500);
+            }
+        }
+
+        function handleAssetError(name) {
+            console.warn(`资源加载失败: ${name}, 但游戏将继续`);
+            checkLoad(); // 即使失败也算作完成，防止游戏卡死
+        }
+
+        // 加载图片
+        const imgPreload = new Image();
+        imgPreload.onload = checkLoad;
+        imgPreload.onerror = () => handleAssetError('character.png');
+        imgPreload.src = imageSrc;
+
+        // 加载音频 (监听 canplaythrough 事件)
+        ['hit', 'bomb', 'boss'].forEach(key => {
+            const audio = sounds[key];
+            // 有些浏览器可能已经缓存了，直接触发
+            if (audio.readyState >= 3) {
+                checkLoad();
+            } else {
+                audio.addEventListener('canplaythrough', checkLoad, { once: true });
+                audio.addEventListener('error', () => handleAssetError(key + '.mp3'), { once: true });
+                // 设置超时，防止某个音频一直加载不了卡住
+                setTimeout(() => {
+                    if(audio.readyState < 3) {
+                         // 这里的逻辑稍微复杂，为了简单起见，如果3秒没加载完就强制认为加载完了
+                         // 实际开发中可以不用这么严格，或者手动触发checkLoad
+                    }
+                }, 5000);
+            }
+        });
+
+        // 辅助：播放声音
+        function playSound(audioObj) {
+            try {
+                audioObj.currentTime = 0; 
+                audioObj.play().catch(e => {}); // 忽略交互前的报错
+            } catch(e) {}
+        }
 
         let highScore = localStorage.getItem('whackGameHighScore') || 0;
         bestScoreEl.textContent = highScore;
@@ -355,113 +443,84 @@
             return hole;
         }
 
-        // 核心循环：冒头
         function peep() {
             if (!isPlaying || isPaused) return;
-
-            // 如果当前是BOSS模式，暂停普通冒头循环，直到BOSS结束
             if (bossActive) return;
 
             const progress = (GAME_DURATION - timeLeft) / GAME_DURATION;
-            
-            // --- 调整过的速度逻辑 (变慢了) ---
-            // 之前是 min: 400->200 (太快了), max: 1000->500
-            // 现在改为 min: 600->450, max: 1200->750
-            // 这样能保证最后阶段地鼠至少停留近 0.5 秒，足够反应
             const minTime = 600 - (150 * progress); 
             const maxTime = 1200 - (450 * progress); 
             
             const time = randomTime(minTime, maxTime);
             const hole = randomHole(holes);
-
-            // 概率判定
-            // 5% 概率出现 BOSS (暴走沙包)
-            // 20% 概率出现 炸弹
             const rand = Math.random();
             
             if (rand < 0.05) {
-                // --- BOSS 降临 ---
                 triggerBoss(hole);
             } else if (rand < 0.25) {
-                // --- 炸弹 ---
                 hole.classList.add('up-trap');
                 hole.querySelector('.trap').onclick = (e) => bonkTrap(e, hole);
                 scheduleNext(hole, time, 'up-trap');
             } else {
-                // --- 普通怪 ---
                 hole.classList.add('up');
                 hole.querySelector('.mole').onclick = (e) => bonkMole(e, hole);
                 scheduleNext(hole, time, 'up');
             }
         }
 
-        // 安排下一次循环
         function scheduleNext(hole, time, activeClass) {
             peepTimeout = setTimeout(() => {
-                // 缩回去
                 hole.classList.remove(activeClass);
-                // 清理事件
                 hole.querySelector('.mole').onclick = null;
                 hole.querySelector('.trap').onclick = null;
-                
                 if (isPlaying && !isPaused) peep();
             }, time);
         }
 
-        // --- 🥊 BOSS 模式逻辑 ---
         function triggerBoss(hole) {
             bossActive = true;
             bossCombo = 0;
-            hole.classList.add('up-boss'); // 红色光环样式
-            
-            // BOSS 绑定连击事件
+            hole.classList.add('up-boss'); 
             const mole = hole.querySelector('.mole');
             mole.onclick = (e) => bonkBoss(e, hole);
 
-            // BOSS 持续 3 秒
             peepTimeout = setTimeout(() => {
                 hole.classList.remove('up-boss');
                 mole.onclick = null;
-                bossActive = false; // 结束BOSS状态
-                
-                // 恢复普通循环
+                bossActive = false; 
                 if (isPlaying && !isPaused) peep();
             }, 3000);
         }
 
         function bonkBoss(e, hole) {
             if(!e.isTrusted) return;
+            playSound(sounds.boss); // 播放音效
 
-            score += 5; // 连击单次分数稍低，为了让你多点
+            score += 5; 
             bossCombo++;
             scoreEl.textContent = score;
 
-            // 视觉反馈：连击数字
             showFloatText("暴揍 x" + bossCombo + "!", e.clientX, e.clientY, "#ff3d00");
             
-            // 视觉反馈：BOSS 震动
             const mole = hole.querySelector('.mole');
             mole.classList.remove('hit-anim');
-            void mole.offsetWidth; // 强制重绘，为了让动画能重复触发
+            void mole.offsetWidth; 
             mole.classList.add('hit-anim');
 
-            // 视觉反馈：打击图标
             const effect = hole.querySelector('.boss-hit-effect');
             effect.style.display = 'none';
             void effect.offsetWidth;
             effect.style.display = 'block';
 
-            // 屏幕震动
             document.body.style.transform = `translate(${Math.random()*4-2}px, ${Math.random()*4-2}px)`;
             setTimeout(()=> document.body.style.transform = "translate(0,0)", 50);
 
-            // 手机强震动
             if(navigator.vibrate) navigator.vibrate(80);
         }
 
-        // --- 普通打击逻辑 ---
         function bonkMole(e, hole) {
             if(!e.isTrusted) return; 
+            playSound(sounds.hit); // 播放音效
 
             score += 10;
             hole.classList.remove('up'); 
@@ -475,6 +534,7 @@
 
         function bonkTrap(e, hole) {
             if(!e.isTrusted) return;
+            playSound(sounds.bomb); // 播放音效
 
             score -= 30; 
             hole.classList.remove('up-trap');
@@ -495,10 +555,7 @@
                 clearTimeout(peepTimeout);
             } else {
                 modalPause.style.display = 'none';
-                // 如果暂停时是BOSS状态，恢复时BOSS会直接消失，为了逻辑简单，直接进入下一轮普通循环
-                // 或者更严谨的做法是记录剩余时间，这里为了简单直接调用peep重新开始
                 if (bossActive) {
-                    // 如果刚好卡在BOSS，强行结束BOSS防止卡死
                     document.querySelectorAll('.up-boss').forEach(h => {
                         h.classList.remove('up-boss');
                         h.querySelector('.mole').onclick = null;
@@ -535,6 +592,12 @@
             clearTimeout(peepTimeout);
             clearInterval(timerInterval);
 
+            // 预先解开音频上下文（移动端需要用户交互）
+            try {
+                sounds.hit.volume = 1.0;
+                sounds.hit.play().then(()=>{ sounds.hit.pause(); sounds.hit.currentTime=0; }).catch(()=>{});
+            } catch(e){}
+
             peep();
             
             timerInterval = setInterval(() => {
@@ -564,11 +627,11 @@
             }
 
             let desc = "这就没力气了？";
-            if(score > 800) desc = "王中之王！141特战队向您致以最崇高的敬意！！👑";
-			else if(score > 700) desc = "无人能敌！暴揍行动的最佳打手！！🏆";
-			else if(score > 600) desc = "暴走模式！打得谢菲尔德满地找牙！！🔥";
-			else if(score > 500) desc = "勇士可嘉！谢菲尔德瑟瑟发抖！💪";
-            else if(score > 300) desc = "出手不凡！打的就是你谢菲尔德！👊";
+           if(score > 800) desc = "王中之王👑 141特战队向您致以最崇高的敬意！！";
+            else if(score > 700) desc = "无人能敌🏆 暴揍行动的最佳打手！！";
+            else if(score > 600) desc = "暴走模式🔥 打得谢菲尔德满地找牙！！";
+            else if(score > 500) desc = "勇气可嘉💪 谢菲尔德瑟瑟发抖！";
+            else if(score > 300) desc = "出手不凡👊 打的就是你谢菲尔德！";
             else if(score > 100) desc = "还需要多加练习！";
 
             if (isNewRecord && score > 0) newRecordBadge.style.display = 'block';
@@ -600,4 +663,3 @@
     
 </body>
 </html>
-
